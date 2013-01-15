@@ -23,59 +23,37 @@ import backtype.storm.tuple.Values;
  */
 public class ManualDRPCTopology {
 
+  // Unique Identifier for DRPC stream
   static final String REQUEST_STREAM_ID = WordCountBolt.class.getName() + "/request-stream";
-  
-  public static class DRPCReceiverBolt extends BaseBasicBolt {
-
-    @Override
-    public void declareOutputFields(OutputFieldsDeclarer declarer) {
-      declarer.declare(new Fields("return-info"));
-    }
-
-    @Override
-    public void execute(Tuple tuple, BasicOutputCollector collector) {
-      Object retInfo = tuple.getValue(1);
-      collector.emit(new Values(retInfo));
-    }
-
-  }
-  
-  public static class DRPCListenerBolt extends BaseBasicBolt {
-    
-    @Override
-    public void declareOutputFields(OutputFieldsDeclarer declarer) {
-      declarer.declare(new Fields("result", "return-info"));
-    }
-
-    @Override
-    public void execute(Tuple tuple, BasicOutputCollector collector) {
-      String counts = tuple.getString(2);
-      Object retInfo = tuple.getValue(3);
-      collector.emit(new Values(counts, retInfo));
-    }
-
-  }
 
   public static void main(String[] args) throws InterruptedException {
     TopologyBuilder builder = new TopologyBuilder();
+    // Use LocalDRPC in local mode
     LocalDRPC drpc = new LocalDRPC();
     
+    // Create a DRPC spout
     DRPCSpout drpcSpout = new DRPCSpout("drpc-query", drpc);
     builder.setSpout("drpc-input", drpcSpout);
 
+    // Set first bold in DRPC to emit tuples on a different stream
     builder.setBolt("prepare-drpc", new StreamChangerBolt(REQUEST_STREAM_ID, "args", "return-info"), 1)
-           .allGrouping("drpc-input");
+           .noneGrouping("drpc-input");
     
+    // Create random sentence spout on default stream
     builder.setSpout("spout", new RandomSentenceSpout(), 2);
+    // Add word splitter bolt that splits random sentence into words
     builder.setBolt("split", new SplitSentenceBolt(), 2)
            .shuffleGrouping("spout");
     
+    // Add word counter bolt that receives splitted words and counts occurances
+    // Note that use of allGrouping with drpc bolt to ensure it is placed before each count bolt in the toplogy
     builder.setBolt("count", new WordCountBolt(REQUEST_STREAM_ID), 2)
-           .fieldsGrouping("split", new Fields("word"))
-           .allGrouping("prepare-drpc", REQUEST_STREAM_ID);
+           .fieldsGrouping("split", new Fields("word")) //place after word splitter bolt in default stream
+           .allGrouping("prepare-drpc", REQUEST_STREAM_ID); //place after DRPC stream change bolt in DRPC stream
     
+    // Add DRPC return bolt that receives tuples from count bolt and returns them to DRPC
     builder.setBolt("return", new ReturnResults(), 3)
-           .allGrouping("count", REQUEST_STREAM_ID);
+           .noneGrouping("count", REQUEST_STREAM_ID);
     
     Config conf = new Config();
     conf.setDebug(false);
@@ -87,43 +65,8 @@ public class ManualDRPCTopology {
     Thread.sleep(10000);
     
     System.out.println("+++++++++++++++++++++++++++++++++++++");
-    System.out.println(drpc.execute("drpc-query", null));
+    System.out.println(drpc.execute("drpc-query", "test"));
     cluster.shutdown();
   }
   
-  public static void main_old(String[] args) throws InterruptedException {
-    TopologyBuilder builder = new TopologyBuilder();
-    
-    LocalDRPC drpc = new LocalDRPC();
-    DRPCSpout drpcSpout = new DRPCSpout("drpc_count", drpc);
-    builder.setSpout("drpc", drpcSpout);
-    builder.setBolt("receive_drpc", new DRPCReceiverBolt(), 3)
-            .noneGrouping("drpc");
-    
-    builder.setSpout("spout", new RandomSentenceSpout(), 2);
-    builder.setBolt("split", new SplitSentenceBolt(), 2)
-           .shuffleGrouping("spout");
-    builder.setBolt("count", new WordCountBolt(REQUEST_STREAM_ID), 2)
-           .fieldsGrouping("split", new Fields("word"))
-           .noneGrouping("receive_drpc");
-
-    builder.setBolt("listen_drpc", new DRPCListenerBolt(), 3)
-            .shuffleGrouping("count");
-    builder.setBolt("return", new ReturnResults(), 3)
-            .shuffleGrouping("listen_drpc");
-    
-    
-    Config conf = new Config();
-    conf.setDebug(false);
-    conf.setMaxTaskParallelism(3);
-
-    LocalCluster cluster = new LocalCluster();
-    cluster.submitTopology("word-count", conf, builder.createTopology());
-
-    Thread.sleep(10000);
-    
-    System.out.println("===================================");
-    System.out.println(drpc.execute("drpc_count", "aaa"));
-    cluster.shutdown();
-  }  
 }

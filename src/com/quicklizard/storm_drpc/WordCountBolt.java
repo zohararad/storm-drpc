@@ -25,35 +25,25 @@ public class WordCountBolt extends BaseBasicBolt {
   @Override
   public void execute(Tuple tuple, BasicOutputCollector collector) {
     if (tuple.getSourceStreamId().equals(_targetStreamId)){
-      Object retInfo = tuple.getValue(0);
+      Object retInfo = tuple.getValue(1);
       collector.emit(_targetStreamId, new Values(counts.toString(), retInfo));
     } else {
       String word = tuple.getString(0);
       Integer count = counts.get(word);
-      if(count == null) count = 0;
+      if(count == null){
+        count = 0;
+      }
       count++;
       counts.put(word, count);
-      //collector.emit(new Values(word, count));
-      //System.out.println("===================================");
-      //System.out.println(word + ":" +count);
+      collector.emit(new Values(word, count));
     }
-    /*
-    if(tuple.getSourceComponent().equals("receive_drpc")){
-      Object retInfo = tuple.getValue(0);
-      collector.emit(new Values(null, null, counts.toString(), retInfo));
-    } else {
-      String word = tuple.getString(0);
-      Integer count = counts.get(word);
-      if(count == null) count = 0;
-      count++;
-      counts.put(word, count);
-      collector.emit(new Values(word, count, null, null));
-    }*/
   }
 
   @Override
   public void declareOutputFields(OutputFieldsDeclarer declarer) {
-    //declarer.declare(new Fields("word", "count"));
+    // output fields on default stream
+    declarer.declare(new Fields("word", "count"));
+    // output fields on drpc stream
     declarer.declareStream(_targetStreamId, new Fields("counts", "return-info"));
   }
 }
