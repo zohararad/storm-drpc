@@ -15,9 +15,29 @@ import java.util.Map;
  */
 public class WordCountBolt extends BaseBasicBolt {
   Map<String, Integer> counts = new HashMap<String, Integer>();
+  
+  private String _targetStreamId;
 
+  public WordCountBolt(String targetStreamId) {
+    _targetStreamId = targetStreamId;
+  }
+  
   @Override
   public void execute(Tuple tuple, BasicOutputCollector collector) {
+    if (tuple.getSourceStreamId().equals(_targetStreamId)){
+      Object retInfo = tuple.getValue(0);
+      collector.emit(_targetStreamId, new Values(counts.toString(), retInfo));
+    } else {
+      String word = tuple.getString(0);
+      Integer count = counts.get(word);
+      if(count == null) count = 0;
+      count++;
+      counts.put(word, count);
+      //collector.emit(new Values(word, count));
+      //System.out.println("===================================");
+      //System.out.println(word + ":" +count);
+    }
+    /*
     if(tuple.getSourceComponent().equals("receive_drpc")){
       Object retInfo = tuple.getValue(0);
       collector.emit(new Values(null, null, counts.toString(), retInfo));
@@ -28,11 +48,12 @@ public class WordCountBolt extends BaseBasicBolt {
       count++;
       counts.put(word, count);
       collector.emit(new Values(word, count, null, null));
-    }
+    }*/
   }
 
   @Override
   public void declareOutputFields(OutputFieldsDeclarer declarer) {
-    declarer.declare(new Fields("word", "count", "counts", "result-info"));
+    //declarer.declare(new Fields("word", "count"));
+    declarer.declareStream(_targetStreamId, new Fields("counts", "return-info"));
   }
 }

@@ -23,6 +23,8 @@ import backtype.storm.tuple.Values;
  */
 public class ManualDRPCTopology {
 
+  static final String REQUEST_STREAM_ID = WordCountBolt.class.getName() + "/request-stream";
+  
   public static class DRPCReceiverBolt extends BaseBasicBolt {
 
     @Override
@@ -56,6 +58,41 @@ public class ManualDRPCTopology {
 
   public static void main(String[] args) throws InterruptedException {
     TopologyBuilder builder = new TopologyBuilder();
+    LocalDRPC drpc = new LocalDRPC();
+    
+    DRPCSpout drpcSpout = new DRPCSpout("drpc-query", drpc);
+    builder.setSpout("drpc-input", drpcSpout);
+
+    builder.setBolt("prepare-drpc", new StreamChangerBolt(REQUEST_STREAM_ID, "args", "return-info"), 1)
+           .allGrouping("drpc-input");
+    
+    builder.setSpout("spout", new RandomSentenceSpout(), 2);
+    builder.setBolt("split", new SplitSentenceBolt(), 2)
+           .shuffleGrouping("spout");
+    
+    builder.setBolt("count", new WordCountBolt(REQUEST_STREAM_ID), 2)
+           .fieldsGrouping("split", new Fields("word"))
+           .allGrouping("prepare-drpc", REQUEST_STREAM_ID);
+    
+    builder.setBolt("return", new ReturnResults(), 3)
+           .allGrouping("count", REQUEST_STREAM_ID);
+    
+    Config conf = new Config();
+    conf.setDebug(false);
+    conf.setMaxTaskParallelism(3);
+
+    LocalCluster cluster = new LocalCluster();
+    cluster.submitTopology("word-count", conf, builder.createTopology());
+
+    Thread.sleep(10000);
+    
+    System.out.println("+++++++++++++++++++++++++++++++++++++");
+    System.out.println(drpc.execute("drpc-query", null));
+    cluster.shutdown();
+  }
+  
+  public static void main_old(String[] args) throws InterruptedException {
+    TopologyBuilder builder = new TopologyBuilder();
     
     LocalDRPC drpc = new LocalDRPC();
     DRPCSpout drpcSpout = new DRPCSpout("drpc_count", drpc);
@@ -66,7 +103,7 @@ public class ManualDRPCTopology {
     builder.setSpout("spout", new RandomSentenceSpout(), 2);
     builder.setBolt("split", new SplitSentenceBolt(), 2)
            .shuffleGrouping("spout");
-    builder.setBolt("count", new WordCountBolt(), 2)
+    builder.setBolt("count", new WordCountBolt(REQUEST_STREAM_ID), 2)
            .fieldsGrouping("split", new Fields("word"))
            .noneGrouping("receive_drpc");
 
